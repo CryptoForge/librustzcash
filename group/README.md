@@ -1,15 +1,8 @@
-# Zcash Rust crates
-
-This repository contains a (work-in-progress) set of Rust crates for
-working with Zcash.
-
-## Security Warnings
-
-These libraries are currently under development and have not been fully-reviewed.
+# group [![Crates.io](https://img.shields.io/crates/v/group.svg)](https://crates.io/crates/group) #
 
 ## License
 
-All code in this workspace is licensed under either of
+Licensed under either of
 
  * Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
  * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
