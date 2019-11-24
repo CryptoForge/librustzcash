@@ -13,6 +13,10 @@ extern crate rand;
 extern crate sapling_crypto;
 extern crate sha2;
 
+
+#[cfg(feature = "transparent-inputs")]
+extern crate ripemd160;
+
 use sapling_crypto::jubjub::JubjubBls12;
 
 pub mod block;
@@ -22,7 +26,7 @@ pub mod merkle_tree;
 pub mod note_encryption;
 pub mod prover;
 pub mod sapling;
-mod serialize;
+pub mod serialize;
 pub mod transaction;
 pub mod zip32;
 

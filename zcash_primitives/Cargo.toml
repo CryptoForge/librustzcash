@@ -18,6 +18,19 @@ rand = "0.4"
 sapling-crypto = { path = "../sapling-crypto" }
 sha2 = "0.8"
 
+ripemd160 = { version = "0.8", optional = true }
+secp256k1 = { version = "0.15", optional = true }
+
 [dependencies.blake2-rfc]
 git = "https://github.com/gtank/blake2-rfc"
 rev = "7a5b5fc99ae483a0043db7547fb79a6fa44b88a9"
+
+[dev-dependencies]
+hex-literal = "0.2"
+rand_xorshift = "0.2"
+
+[features]
+transparent-inputs = ["ripemd160", "secp256k1"]
+
+[target.'cfg(target_os="android")'.dependencies]
+jni = { version = "0.9", default-features = false }

@@ -10,6 +10,9 @@ use std::io::{self, Read, Write};
 use legacy::Script;
 use JUBJUB;
 
+pub mod amount;
+pub use self::amount::Amount;
+
 // π_A + π_B + π_C
 pub const GROTH_PROOF_SIZE: usize = (48 + 96 + 48);
 // π_A + π_A' + π_B + π_B' + π_C + π_C' + π_K + π_H
@@ -18,53 +21,17 @@ const PHGR_PROOF_SIZE: usize = (33 + 33 + 65 + 33 + 33 + 33 + 33 + 33);
 const ZC_NUM_JS_INPUTS: usize = 2;
 const ZC_NUM_JS_OUTPUTS: usize = 2;
 
-const COIN: i64 = 1_0000_0000;
-const MAX_MONEY: i64 = 21_000_000 * COIN;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Amount(pub i64);
-
-impl Amount {
-    // Read an Amount from a signed 64-bit little-endian integer.
-    pub fn read_i64<R: Read>(mut reader: R, allow_negative: bool) -> io::Result<Self> {
-        let amount = reader.read_i64::<LittleEndian>()?;
-        if 0 <= amount && amount <= MAX_MONEY {
-            Ok(Amount(amount))
-        } else if allow_negative && -MAX_MONEY <= amount && amount < 0 {
-            Ok(Amount(amount))
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                if allow_negative {
-                    "Amount not in {-MAX_MONEY..MAX_MONEY}"
-                } else {
-                    "Amount not in {0..MAX_MONEY}"
-                },
-            ))
-        }
-    }
-
-    // Read an Amount from an unsigned 64-bit little-endian integer.
-    pub fn read_u64<R: Read>(mut reader: R) -> io::Result<Self> {
-        let amount = reader.read_u64::<LittleEndian>()?;
-        if amount <= MAX_MONEY as u64 {
-            Ok(Amount(amount as i64))
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Amount not in {0..MAX_MONEY}",
-            ))
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OutPoint {
     hash: [u8; 32],
     n: u32,
 }
 
 impl OutPoint {
+    pub fn new(hash: [u8; 32], n: u32) -> Self {
+        OutPoint { hash, n }
+    }
+
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         let mut hash = [0; 32];
         reader.read_exact(&mut hash)?;
@@ -81,11 +48,20 @@ impl OutPoint {
 #[derive(Debug)]
 pub struct TxIn {
     pub prevout: OutPoint,
-    script_sig: Script,
+    pub script_sig: Script,
     pub sequence: u32,
 }
 
 impl TxIn {
+    #[cfg(feature = "transparent-inputs")]
+    pub fn new(prevout: OutPoint) -> Self {
+        TxIn {
+            prevout,
+            script_sig: Script::default(),
+            sequence: std::u32::MAX,
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
         let prevout = OutPoint::read(&mut reader)?;
         let script_sig = Script::read(&mut reader)?;
@@ -105,15 +81,29 @@ impl TxIn {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TxOut {
     pub value: Amount,
     pub script_pubkey: Script,
 }
 
 impl TxOut {
+    pub fn new() -> Self {
+        let value = Amount::zero();
+        let script_pubkey = Script::default();
+        TxOut{
+            value,
+            script_pubkey
+        }
+    }
+
     pub fn read<R: Read>(mut reader: &mut R) -> io::Result<Self> {
-        let value = Amount::read_i64(&mut reader, false)?;
+        let value = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_nonnegative_i64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "value out of range"))?;
         let script_pubkey = Script::read(&mut reader)?;
 
         Ok(TxOut {
@@ -123,7 +113,7 @@ impl TxOut {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_i64::<LittleEndian>(self.value.0)?;
+        writer.write_all(&self.value.to_i64_le_bytes())?;
         self.script_pubkey.write(&mut writer)
     }
 }
@@ -335,10 +325,21 @@ impl std::fmt::Debug for JSDescription {
 impl JSDescription {
     pub fn read<R: Read>(mut reader: R, use_groth: bool) -> io::Result<Self> {
         // Consensus rule (§4.3): Canonical encoding is enforced here
-        let vpub_old = Amount::read_u64(&mut reader)?;
+        let vpub_old = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_u64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "vpub_old out of range"))?;
 
         // Consensus rule (§4.3): Canonical encoding is enforced here
-        let vpub_new = Amount::read_u64(&mut reader)?;
+        let vpub_new = {
+            let mut tmp = [0; 8];
+            reader.read_exact(&mut tmp)?;
+            Amount::from_u64_le_bytes(tmp)
+        }
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "vpub_new out of range"))?;
+
 
         // Consensus rule (§4.3): One of vpub_old and vpub_new being zero is
         // enforced by CheckTransactionWithoutProofVerification() in zcashd.
@@ -411,8 +412,8 @@ impl JSDescription {
     }
 
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_i64::<LittleEndian>(self.vpub_old.0)?;
-        writer.write_i64::<LittleEndian>(self.vpub_new.0)?;
+        writer.write_all(&self.vpub_old.to_i64_le_bytes())?;
+        writer.write_all(&self.vpub_new.to_i64_le_bytes())?;
         writer.write_all(&self.anchor)?;
         writer.write_all(&self.nullifiers[0])?;
         writer.write_all(&self.nullifiers[1])?;
